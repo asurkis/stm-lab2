@@ -29,7 +29,11 @@ int id;
 short xy[2];
 unsigned char op;
 unsigned char g_input;
+unsigned char buf[8];
+char msg[] = "computations complete\r\n";
+char txt_err[] = "error\r\n";
 int is_interrupt = 1;
+int g_has_received = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -44,10 +48,10 @@ static void MX_USART6_UART_Init(void);
 
 void Transmit(UART_HandleTypeDef *huart, uint8_t *pData, uint16_t size, uint32_t timeout, int isInterrupt) {
 	if (isInterrupt) {
-		HAL_UART_Transmit_IT(huart, pData, size);
+		while (HAL_UART_Transmit_IT(huart, pData, size) != HAL_OK);
 	}
 	else {
-		HAL_UART_Transmit(huart, pData, size, timeout);
+		while (HAL_UART_Transmit(huart, pData, size, timeout) != HAL_OK);
 	}
 }
 
@@ -98,7 +102,6 @@ void HandleInput(unsigned char input, int isInterrupt) {
 			}
 
 		if (!is_error) {
-			unsigned char buf[8];
 			int bufpos = sizeof(buf) / sizeof(*buf);
 			buf[--bufpos] = '\n';
 			buf[--bufpos] = '\r';
@@ -121,6 +124,7 @@ void HandleInput(unsigned char input, int isInterrupt) {
 			}
 
 			Transmit(&huart6, &buf[bufpos], sizeof(buf) - sizeof(*buf) * bufpos, 100, isInterrupt);
+			Transmit(&huart6, msg, sizeof(msg) - 1, 100, isInterrupt);
 		}
 
 		xy[0] = 0;
@@ -139,7 +143,6 @@ void HandleInput(unsigned char input, int isInterrupt) {
 
 	if (is_error) {
 		HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, GPIO_PIN_SET);
-		char txt_err[] = "error\r\n";
 		Transmit(&huart6, txt_err, sizeof(txt_err) - 1, 100, isInterrupt);
 		xy[0] = 0;
 		xy[1] = 0;
@@ -150,7 +153,12 @@ void HandleInput(unsigned char input, int isInterrupt) {
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
-	HandleInput(g_input, 1);
+//	HandleInput(g_input, 1);
+	g_has_received = 1;
+}
+
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {
+//	g_isBusy = 0;
 }
 
 int ButtonGetState(void) {
@@ -218,26 +226,26 @@ int main(void)
 		}
 
 		if (is_interrupt) {
+			if (g_has_received) {
+				HandleInput(g_input, 1);
+				g_has_received = 0;
+			}
 			HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, GPIO_PIN_SET);
 			switch (HAL_UART_Receive_IT(&huart6, &g_input, sizeof(g_input))) {
 			case HAL_OK:
 				break;
 
-			case HAL_ERROR:
-			case HAL_BUSY:
-			case HAL_TIMEOUT:
+			default:
 				continue;
 			}
 		} else {
 			HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, GPIO_PIN_RESET);
 
-			switch (HAL_UART_Receive(&huart6, &g_input, sizeof(g_input), 100)) {
+			switch (HAL_UART_Receive(&huart6, &g_input, sizeof(g_input), 1)) {
 			case HAL_OK:
 				break;
 
-			case HAL_ERROR:
-			case HAL_BUSY:
-			case HAL_TIMEOUT:
+			default:
 				continue;
 			}
 
@@ -329,12 +337,29 @@ static void MX_USART6_UART_Init(void)
   */
 static void MX_GPIO_Init(void)
 {
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
 
   /* GPIO Ports Clock Enable */
-  __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOC_CLK_ENABLE();
+  __HAL_RCC_GPIOD_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin : PC15 */
+  GPIO_InitStruct.Pin = GPIO_PIN_15;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : PD13 PD14 PD15 */
+  GPIO_InitStruct.Pin = GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
 }
 
